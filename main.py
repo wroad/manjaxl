@@ -290,27 +290,26 @@ def scan_zipfile(fname):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('indir')
-    parser.add_argument('outdir')
-    parser.add_argument('-v', '--verbose', action='store_true', help="display mroe information")
+    parser.add_argument('input')
+    parser.add_argument('output')
+    parser.add_argument('-v', '--verbose', action='store_true', help="display more information")
     parser.add_argument('-n', '--limit', type=int, help="max number of images to transcode, useful for testing parameters")
     parser.add_argument('-k', '--nearest', type=int, help="number of similar images to test compression against", default=3)
     parser.add_argument('-q', '--quality', type=int, help="quality level, default auto (90 for jpg, 100 for png) (100=lossless)", default=-1)
     parser.add_argument('--depth', type=int, help="maximum number of images to decode to reconstruct (default 3)", default=3)
-    parser.add_argument('--group-size', type=int, help="attempt to batch this many images together", default=100)
     parser.add_argument('--threads', type=int, help="number of parallel threads to use (default=number of CPU cores)", default=os.cpu_count())
-    parser.add_argument('--dump-dists')
+    parser.add_argument('--dump-dists', help="output image distances to file for debugging")
     args = parser.parse_args()
 
-    if os.path.splitext(args.indir.lower())[1] in ('.zip', '.cbz'):
-        pngs = sorted(scan_zipfile(args.indir))
+    if os.path.splitext(args.input.lower())[1] in ('.zip', '.cbz'):
+        pngs = sorted(scan_zipfile(args.input))
     else:
-        pngs = sorted(glob.glob(args.indir + '/*.*'))
+        pngs = sorted(glob.glob(args.input + '/*.*'))
 
     if args.limit:
         pngs = pngs[:args.limit]
 
-    crunch(pngs, args.outdir, args)
+    crunch(pngs, args.output, args)
 
 
 if __name__ == '__main__':
