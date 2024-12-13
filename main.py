@@ -178,8 +178,7 @@ def crunch(infiles, outdir, args):
         if args.verbose:
             print()
             for fname, bufs in sorted(opts.items()):
-                print(barename(fname), ' '.join(f'{barename(n or "-")}:{len(b)}' for n,b in bufs.items()))
-            print({k: {n: len(b) for n, b in v.items()} for k, v in opts.items()})
+                print(barename(fname), ' '.join(f'{barename(n or "-")}:{b}' for n,b in bufs.items()))
 
         if args.dump_dists:
             with open(args.dump_dists, 'w') as f:
@@ -304,7 +303,7 @@ def main():
     if os.path.splitext(args.input.lower())[1] in ('.zip', '.cbz'):
         pngs = sorted(scan_zipfile(args.input))
     else:
-        pngs = sorted(glob.glob(args.input + '/*.*'))
+        pngs = sorted(glob.glob(glob.escape(args.input) + '/*.*'))
 
     if args.limit:
         pngs = pngs[:args.limit]
