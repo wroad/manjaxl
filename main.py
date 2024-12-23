@@ -35,7 +35,7 @@ def load_image(path):
     if getattr(im, 'is_animated', None):
         raise ValueError("cannot handle animations for: " + path)
     if im.mode == '1':
-        im = im.convert('RGB')
+        im = im.convert('L')
     elif im.mode == 'P':
         im = im.convert('RGBA')
     return im
@@ -287,11 +287,78 @@ def scan_zipfile(fname):
             yield f'{fname}\x00{name}'
 
 
+def expand_image(args):
+    name, quality = args
+
+    if '\x00' in name:
+        bname, fname = name.split('\x00')
+        bname += '\x00'
+    else:
+        bname = os.path.dirname(name)
+        fname = os.path.basename(name)
+
+    if name.endswith('.jxl') and '_ON_' in name:
+        delta = load_image(name)
+        index = 0
+        while (index := fname.find('_ON_', index) + 4) >= 4:
+            if '\x00' in name:
+                path = bname + fname[index:]
+            else:
+                path = os.path.join(bname, fname[index:])
+            base = load_image(path)
+            base.paste(delta, (0, 0), delta)
+            delta = base
+    else:
+        base = load_image(name)
+
+    buf = io.BytesIO()
+    oname = os.path.splitext(fname)[0].split('_ON_')[0]
+    if quality == 100:
+        oname += '.png'
+        base.save(buf, 'png')
+    else:
+        oname += '.jpg'
+        base.save(buf, 'jpeg', quality=quality)
+    return oname, name, buf.getvalue()
+
+
+def expand(infiles, outdir, args):
+    infiles = sorted(infiles)
+
+    os.makedirs(os.path.dirname(outdir) or '.', exist_ok=True)
+
+    size_input = 0
+    size_output = 0
+
+    zf = None
+    if outdir.endswith('.zip'):
+        zf = zipfile.ZipFile(outdir + '.tmp', 'w')
+    else:
+        os.makedirs(outdir, exist_ok=True)
+
+    with multiprocessing.Pool(processes=args.threads) as pool:
+        for fname, oname, buf in tqdm(pool.imap(expand_image, ((f, args.quality) for f in infiles)),
+                total=len(infiles), desc="creating output files", unit='im', smoothing=0):
+            size_input += len(read_file(oname))
+            size_output += len(buf)
+            if zf:
+                zf.writestr(fname, buf, compresslevel=0)
+            else:
+                with open(os.path.join(outdir, fname), 'wb') as f:
+                    f.write(buf)
+        if zf:
+            zf.close()
+            os.rename(outdir + '.tmp', outdir)
+
+    print(f"input: {size_input/1024**2:,.2f} MiB, output: {size_output/1024**2:,.2f} MiB")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('input')
     parser.add_argument('output')
     parser.add_argument('-v', '--verbose', action='store_true', help="display more information")
+    parser.add_argument('-d', '--decode', action='store_true', help="decode into a normal comic zip archive with jpeg or png images")
     parser.add_argument('-n', '--limit', type=int, help="max number of images to transcode, useful for testing parameters")
     parser.add_argument('-k', '--nearest', type=int, help="number of similar images to test compression against", default=3)
     parser.add_argument('-q', '--quality', type=int, help="quality level, default auto (90 for jpg, 100 for png) (100=lossless)", default=-1)
@@ -308,7 +375,12 @@ def main():
     if args.limit:
         pngs = pngs[:args.limit]
 
-    crunch(pngs, args.output, args)
+    if args.decode:
+        if args.quality == -1:
+            args.quality = 90
+        expand(pngs, args.output, args)
+    else:
+        crunch(pngs, args.output, args)
 
 
 if __name__ == '__main__':
