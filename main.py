@@ -17,6 +17,11 @@ from PIL import Image, ImageChops, ImageMath, ImageFilter
 from jxlpy import JXLImagePlugin
 from tqdm import tqdm
 
+try:
+    import rarfile
+except ImportError:
+    pass
+
 Thumb = collections.namedtuple('Thumb', 'name key thumb tinygray')
 
 def read_file(path, cache={}):
@@ -25,7 +30,10 @@ def read_file(path, cache={}):
         zfname, path = path.split('\x00')
         key = (zfname, os.getpid())  # goofy multiprocessing hack
         if key not in cache:
-            cache[key] = zipfile.ZipFile(zfname)
+            if zfname.endswith('.rar') or zfname.endswith('.cbr'):
+                cache[key] = rarfile.RarFile(zfname)
+            else:
+                cache[key] = zipfile.ZipFile(zfname)
         return cache[key].read(path)
     return open(path, 'rb').read()
 
@@ -42,10 +50,13 @@ def load_image(path):
 
 
 def make_thumb(fname):
-    im = load_image(fname)
-    thumb = im.convert("RGB").resize((128, 128), resample=Image.LANCZOS)
-    tinygray = thumb.resize((16, 16), resample=Image.LANCZOS).convert("L")
-    return Thumb(fname, (im.mode, im.size), thumb, tinygray)
+    try:
+        im = load_image(fname)
+        thumb = im.convert("RGB").resize((128, 128), resample=Image.LANCZOS)
+        tinygray = thumb.resize((16, 16), resample=Image.LANCZOS).convert("L")
+        return Thumb(fname, (im.mode, im.size), thumb, tinygray)
+    except Exception as exc:
+        raise ValueError("make_thumb failed for " + fname.replace("\x00", ":")) from exc
 
 
 def barename(fname):
@@ -77,7 +88,12 @@ def diffcount(a, b):
 def compute_deltas(args):
     basename, targets, quality = args
     base = load_image(basename)
-    bufs = [len(mkdelta(None, base, quality, 5))]
+    try:
+        bufs = [len(mkdelta(None, base, quality, 5))]
+    except Exception:
+        print("error computing base image", basename)
+        traceback.print_exc()
+        bufs.append(0)
     for target in targets:
         try:
             bufs.append(len(mkdelta(target, base, quality, 4)))
@@ -286,6 +302,15 @@ def scan_zipfile(fname):
                 raise ValueError('cannot handle animations: ' + name)
             yield f'{fname}\x00{name}'
 
+def scan_rarfile(fname):
+    with rarfile.RarFile(fname) as zf:
+        for name in zf.namelist():
+            if name.endswith('/'):
+                continue
+            if name.endswith('.gif'):
+                raise ValueError('cannot handle animations: ' + name)
+            yield f'{fname}\x00{name}'
+
 
 def expand_image(args):
     name, quality = args
@@ -369,6 +394,8 @@ def main():
 
     if os.path.splitext(args.input.lower())[1] in ('.zip', '.cbz'):
         pngs = sorted(scan_zipfile(args.input))
+    elif os.path.splitext(args.input.lower())[1] in ('.rar', '.cbr'):
+        pngs = sorted(scan_rarfile(args.input))
     else:
         pngs = sorted(glob.glob(glob.escape(args.input) + '/*.*'))
 
